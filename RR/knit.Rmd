@@ -1,0 +1,128 @@
+---
+title: "Reproducible Research Course Project 2"
+output: html_document
+---
+
+#Economic and Health Impact of Weather Events in the USA
+<!-- regular html comment Language: Your document should be written in English.
+Title: Your document should have a title that briefly summarizes your data analysis--> 
+
+##Synopsis
+<!--: Immediately after the title, there should be a synopsis which describes and summarizes your analysis in at most 10 complete sentences. -->
+  This is an analysis report on the economic and human impact of weather events in the USA, based on data collected by the U.S. National Oceanic and Atmospheric Administration's (NOAA), between 1950 and 2011. 
+  The economic impact will summarize the total amount of damage caused  by different types of severe weather conditions, estimated in billions of Dollars.
+  Health or Human impact will account for the number of injuries and fatalities associated with weather events.
+
+##Data Processsing
+<!-- There should be a section titled Data Processing which describes (in words and code) how the data were loaded into R and processed for analysis. In particular, your analysis must start from the raw CSV file containing the data. You cannot do any preprocessing outside the document. If preprocessing is time-consuming you may consider using the cache = TRUE option for certain code chunks. -->
+
+The storm data collected should be present in the working directory, otherwise it will be downloaded from it's internet address. 
+```{r}
+if ( !file.exists("repdata-data-StormData.csv.bz2")){
+  download.file("https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2",
+                "repdata-data-StormData.csv.bz2")
+  }
+
+```
+
+
+A data frame is created, using only the columns that are relevant for the analysis.
+```{r cache=TRUE}
+smallstorm <- read.csv("repdata-data-StormData.csv.bz2",stringsAsFactors=FALSE)[,c("PROPDMG","PROPDMGEXP","CROPDMG","CROPDMGEXP","FATALITIES","INJURIES","EVTYPE")]
+```
+
+
+The data frame is then converted into a data table and the event type collumn is then cleaned, making all strings uppercase and consolidating different event types that should refer to the same type of event.
+```{r}
+library(data.table)
+
+smallstorm <- data.table(smallstorm)
+smallstorm[,EVTYPE1:=trimws(toupper(EVTYPE))]
+smallstorm[,EVTYPE2:=EVTYPE1]
+smallstorm[EVTYPE2 %like% "TSTM",
+       EVTYPE2:="THUNDERSTORM WIND"]
+smallstorm[EVTYPE2 %like% "THUNDERSTORM" & EVTYPE2 != "THUNDERSTORM WIND",
+       EVTYPE2:="THUNDERSTORM WIND"]
+smallstorm[EVTYPE2 %like% "TORNADO" & EVTYPE2!="TORNADO",
+       EVTYPE2:="TORNADO"]
+smallstorm[EVTYPE2 %like% "TORNADO" & EVTYPE2!="TORNADO",
+       EVTYPE2:="TORNADO"]
+smallstorm[EVTYPE2 %like% "HEAT" & EVTYPE2!="EXCESSIVE HEAT",
+       EVTYPE2:="EXCESSIVE HEAT"]
+smallstorm[EVTYPE2 %like% "SNOW" & EVTYPE2!="HEAVY SNOW",
+       EVTYPE2:="HEAVY SNOW"]
+smallstorm[EVTYPE2 %like% "FIRE" & EVTYPE2!="WILDFIRE",
+       EVTYPE2:="WILDFIRE"]
+smallstorm[EVTYPE2 %like% "FLOOD" & EVTYPE2!="FLOOD",
+       EVTYPE2:="FLOOD"]
+smallstorm[EVTYPE2 %like% "CURRENT" & EVTYPE2!="RIP CURRENT",
+       EVTYPE2:="RIP CURRENT"]
+smallstorm[EVTYPE2 %like% "WIND" & EVTYPE2 != "THUNDERSTORM WIND",
+       EVTYPE2:="THUNDERSTORM WIND"]
+```
+
+The Property and Crop damage information is represented by different units identified in the EXP columns. New Property and Crop damage collumns are created containing the literal value of the damage multiplied by the most significant unit types ( Billion, Million, Thousand ).
+```{r}
+smallstorm[,PROPDMGEXP1:=trimws(toupper(PROPDMGEXP))]
+smallstorm[,CROPDMGEXP1:=trimws(toupper(CROPDMGEXP))]
+
+smallstorm[,PROPDMG1 := PROPDMG]
+smallstorm[,CROPDMG1 := CROPDMG]
+smallstorm[PROPDMGEXP1 == "B",PROPDMG1 := PROPDMG*1000000000 ]
+smallstorm[PROPDMGEXP1 == "M",PROPDMG1 := PROPDMG*1000000 ]
+smallstorm[PROPDMGEXP1 == "K",PROPDMG1 := PROPDMG*1000 ]
+smallstorm[CROPDMGEXP1 == "B",CROPDMG1 := PROPDMG*1000000000 ]
+smallstorm[CROPDMGEXP1 == "M",CROPDMG1 := PROPDMG*1000000 ]
+smallstorm[CROPDMGEXP1 == "K",CROPDMG1 := PROPDMG*1000 ]
+```
+
+Two data tables will be used to store the summary data related respectively to health and economic impacts. 
+Only the top 12 events will be listed, plus the the remainder events aggregated as "others".
+```{r}
+
+health <- smallstorm[ , .(Occurrence = .N,CASUALTIES = sum(FATALITIES+INJURIES)), by=EVTYPE2 ][CASUALTIES > 1000][order(-CASUALTIES)]
+health <- rbindlist(list(health,smallstorm[ , .(.N,CASUALTIES = sum(FATALITIES+INJURIES)), by=EVTYPE2 ][CASUALTIES < 1000][,.("others",sum(N),sum(CASUALTIES))]))
+health
+
+econ <- smallstorm[, .(Occurrence = .N,Damage = round(sum(PROPDMG1+CROPDMG1)/1000000000)), by = EVTYPE2][Damage >=5 ][order(-Damage)]
+econ <- rbindlist(list(econ,smallstorm[, .(.N,Damage = round(sum(PROPDMG1+CROPDMG1)/1000000000)), by = EVTYPE2][Damage < 5][,.("others",sum(N),damage = sum(Damage))]))
+econ
+
+
+```
+
+#Results
+The results will be displayed in the form of bar charts, based on the two summary data tables.
+```{r}
+
+library(ggplot2)
+g <- ggplot(health, aes(reorder(EVTYPE2,CASUALTIES),CASUALTIES, fill = EVTYPE2))
+g + geom_bar(stat='identity') + 
+  coord_flip() + 
+  ggtitle("Health impact of weather events in the USA") +
+  theme(plot.title = element_text(size=22)) +
+  labs(x = "EVENT TYPE") + 
+  scale_fill_discrete(name="EVENT TYPE")
+
+
+```
+
+
+The study shows that the weather event type that causes the most harm to people in the USA is 'TORNADO'.
+
+
+```{r}
+g <- ggplot(econ, aes(reorder(EVTYPE2,Damage),Damage, fill = EVTYPE2))
+g + geom_bar(stat='identity') + 
+  coord_flip() + 
+  ggtitle("Economic impact of weather events in the USA") +
+  theme(plot.title = element_text(size=22)) +
+  labs(x = "EVENT TYPE") + 
+  labs(y = "DAMAGE IN BILLIONS USD") + 
+  scale_fill_discrete(name="EVENT TYPE")
+
+
+```
+
+
+The Economic aspect of the study shows evidence that the weather event type that causes the most damage to property or crop in the USA is 'ICE STORM'.
